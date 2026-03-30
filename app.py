@@ -25,36 +25,47 @@ st.markdown("""
     .stTextInput input, .stTextArea textarea, [data-testid="stSelectbox"], .stNumberInput input {
         direction: RTL; text-align: right;
     }
-    .preview-box {
-        border: 1px solid #e6e9ef;
+    .batch-config-card {
         padding: 15px;
-        border-radius: 8px;
-        background-color: #f8f9fa;
-        color: #333;
-    }
-    .batch-info {
-        padding: 10px;
-        background-color: #e3f2fd;
-        border-radius: 5px;
+        background-color: #f1f3f4;
+        border-radius: 10px;
+        border-right: 5px solid #1a73e8;
         margin-bottom: 10px;
-        border-right: 5px solid #2196f3;
+    }
+    .auto-dist-card {
+        padding: 15px;
+        background-color: #e8f0fe;
+        border-radius: 10px;
+        border-right: 5px solid #34a853;
+        margin-bottom: 10px;
+    }
+    .timer-active {
+        color: #d93025;
+        font-weight: bold;
+        font-size: 1.2rem;
+    }
+    .info-box {
+        background-color: #fff3cd;
+        padding: 10px;
+        border-radius: 5px;
+        border: 1px solid #ffeeba;
+        margin-bottom: 10px;
     }
     </style>
     """, unsafe_allow_html=True)
 
 # --- SESSION STATE ---
-if 'current_idx' not in st.session_state: st.session_state.current_idx = 0
-if 'is_running' not in st.session_state: st.session_state.is_running = False
 if 'logs' not in st.session_state: st.session_state.logs = []
+if 'is_running' not in st.session_state: st.session_state.is_running = False
+if 'auto_times' not in st.session_state: st.session_state.auto_times = [datetime.now().time()]
 
 def reset_all():
-    st.session_state.current_idx = 0
-    st.session_state.is_running = False
     st.session_state.logs = []
+    st.session_state.is_running = False
+    st.session_state.auto_times = [datetime.now().time()]
 
 # --- CORE FUNCTIONS ---
 def extract_emails(text):
-    """اسْتِخْرَاجُ جَمِيعِ الإِيمِيلَاتِ مِنَ النَّصِّ بِغَضِّ النَّظَرِ عَنِ الفَوَاصِلِ."""
     return re.findall(r'[\w\.-]+@[\w\.-]+\.\w+', text)
 
 def send_mail(server, sender, to, subject, body, atts, is_html):
@@ -75,22 +86,18 @@ def send_mail(server, sender, to, subject, body, atts, is_html):
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.title("🔐 إِعْدَادَاتُ الوُصُولِ")
+    st.title("🔐 إِعْدَادَاتُ الحِسَابِ")
     u_mail = st.text_input("إِيمِيلُ Gmail", placeholder="example@gmail.com")
     u_pass = st.text_input("كَلِمَةُ مُرُورِ التَّطْبِيقِ", type="password")
     st.divider()
-    st.title("🕒 جَدْوَلَةُ الإِرْسَالِ")
-    enable_schedule = st.checkbox("تَفْعِيلُ الجَدْوَلَةِ")
-    sched_time = st.time_input("وَقْتُ الانْطِلَاقِ", value=datetime.now().time(), disabled=not enable_schedule)
-    st.divider()
-    if st.button("🗑️ إِعَادَةُ تَعْيِينِ العَمَلِيَّةِ"):
+    if st.button("🗑️ مَسْحُ السِّجِلَّاتِ وَالجَدْوَلَةِ"):
         reset_all()
         st.rerun()
 
 # --- MAIN INTERFACE ---
 st.title("📊 نِظَامُ الإِرْسَالِ الذَّكِيِّ")
 
-t1, t2, t3 = st.tabs(["📂 مَصَادِرُ البَيَانَاتِ وَالمُرْفَقَاتِ", "📝 تَصْمِيمُ الرِّسَالَةِ", "🚀 التَّنْفِيذُ وَالتَّقَارِيرُ"])
+t1, t2, t3 = st.tabs(["📂 مَصَادِرُ البَيَانَاتِ", "📝 التَّصْمِيمُ", "🚀 جَدْوَلَةُ الدَّفَعَاتِ المَفْتُوحَةِ"])
 
 with t1:
     col1, col2 = st.columns(2)
@@ -99,139 +106,130 @@ with t1:
         file = st.file_uploader("رَفْعُ مَلَفِّ Excel أَوْ CSV", type=['xlsx', 'csv'])
         manual_text = st.text_area("أَوْ أَضِفِ الإِيمِيلَاتِ هُنَا", height=100)
     with col2:
-        st.subheader("2️⃣ المُرْفَقَاتُ الذَّكِيَّةُ")
-        zip_file = st.file_uploader("ارْفَعْ مَلَفَّ ZIP (لِلْمُرْفَقَاتِ المُخَصَّصَةِ لِكُلِّ عَمِيلٍ)", type=['zip'])
-        if zip_file:
-            st.info("سَيَتِمُّ رَبْطُ المَلَفَّاتِ تِلْقَائِيّاً إِذَا كَانَ اسْمُ المَلَفِّ دَاخِلَ ZIP يُطَابِقُ إِيمِيلَ المُسْتَلِمِ.")
+        st.subheader("2️⃣ المُرْفَقَاتُ")
+        zip_file = st.file_uploader("ارْفَعْ مَلَفَّ ZIP لِلْمُرْفَقَاتِ المُخَصَّصَةِ", type=['zip'])
 
-    # مُعَالَجَةُ البَيَانَاتِ
     final_df = pd.DataFrame()
     if file:
         final_df = pd.read_csv(file) if file.name.endswith('.csv') else pd.read_excel(file)
-    
     if manual_text:
-        found_emails = extract_emails(manual_text)
-        if found_emails:
-            manual_df = pd.DataFrame(found_emails, columns=['البريد'])
-            manual_df['الاسم'] = "عَمِيلَنَا العَزِيزُ"
-            final_df = pd.concat([final_df, manual_df], ignore_index=True)
+        found = extract_emails(manual_text)
+        if found:
+            m_df = pd.DataFrame(found, columns=['البريد'])
+            m_df['الاسم'] = "عَمِيلَنَا العَزِيزُ"
+            final_df = pd.concat([final_df, m_df], ignore_index=True)
 
     if not final_df.empty:
-        st.success(f"إِجْمَالِيُّ المُسْتَلِمِينَ المُكْتَشَفِينَ: {len(final_df)}")
-        c1, c2 = st.columns(2)
-        cols = final_df.columns.tolist()
-        e_col = c1.selectbox("اخْتَرْ عَمُودَ البَرِيدِ الإِلِكْتْرُونِيِّ", cols)
-        n_col = c2.selectbox("اخْتَرْ عَمُودَ الاسْمِ (اخْتِيَارِيٌّ)", [None] + cols)
+        st.success(f"تَمَّ اكْتِشَافُ {len(final_df)} مُسْتَلِمٍ.")
+        e_col = st.selectbox("اخْتَرْ عَمُودَ البَرِيدِ", final_df.columns)
+        n_col = st.selectbox("اخْتَرْ عَمُودَ الاسْمِ (اختياري)", [None] + list(final_df.columns))
 
 with t2:
     subj = st.text_input("مَوْضُوعُ البَرِيدِ")
-    m_mode = st.radio("تَنْسِيقُ المُحْتَوَى", ["نَصٌّ عَادِيٌّ", "HTML"], horizontal=True)
-    msg_body = st.text_area("نَصُّ الرِّسَالَةِ (اسْتَخْدِمْ {name} لِتَخْصِيصِ الاسْمِ)", height=200)
-    general_atts = st.file_uploader("المُرْفَقَاتُ العَامَّةُ (لِلْجَمِيعِ)", accept_multiple_files=True)
-    
-    with st.expander("👁️ مُعَايَنَةُ الرِّسَالَةِ"):
-        processed = msg_body.replace("{name}", "مُحَمَّد")
-        if m_mode == "HTML":
-            st.markdown(f'<div class="preview-box">{processed}</div>', unsafe_allow_html=True)
-        else:
-            st.code(processed, language="text")
+    m_mode = st.radio("التَّنْسِيقُ", ["نَصٌّ عَادِيٌّ", "HTML"], horizontal=True)
+    msg_body = st.text_area("نَصُّ الرِّسَالَةِ (اسْتَخْدِمْ {name} لِالتَّخْصِيصِ)", height=200)
+    general_atts = st.file_uploader("المُرْفَقَاتُ العَامَّةُ", accept_multiple_files=True)
 
 with t3:
-    st.subheader("⚙️ التَّحَكُّمُ الذَّكِيُّ فِي الدَّفَعَاتِ")
     if not final_df.empty:
-        # إِعْدَادَاتُ الدَّفَعَاتِ المُطَوَّرَةِ
-        col_batch1, col_batch2, col_batch3 = st.columns(3)
-        with col_batch1:
-            batch_size = st.number_input("حَجْمُ الدُّفْعَةِ (عَدَدُ الرَّسَائِلِ):", 1, 1000, 50)
-        with col_batch2:
-            wait_time = st.number_input("الِانْتِظَارُ بَيْنَ الدَّفَعَاتِ (دَقَائِق):", 0, 60, 5)
-        with col_batch3:
-            inter_msg_delay = st.number_input("التَّأْخِيرُ بَيْنَ كُلِّ رِسَالَةٍ (ثَوَانٍ):", 0, 30, 2)
+        st.subheader("⏱️ إِضَافَةُ مَوَاعِيدِ الدَّفَعَاتِ (تَوْزِيعٌ تِلْقَائِيٌّ)")
+        st.markdown("""
+        <div class="info-box">
+        💡 <b>كَيْفَ تَعْمَلُ؟</b> أَضِفْ أَيَّ عَدَدٍ مِنَ المَوَاعِيدِ. سَيَقُومُ النِّظَامُ بِتَقْسِيمِ الـ {total} إِيمِيل تِلْقَائِيّاً عَلَى هَذِهِ المَوَاعِيدِ بِالتَّسَاوِي.
+        </div>
+        """.format(total=len(final_df)), unsafe_allow_html=True)
+        
+        # إضافة مواعيد جديدة
+        if st.button("➕ إِضَافَةُ مَوْعِدِ دَفْعَةٍ جَدِيدٍ"):
+            st.session_state.auto_times.append(datetime.now().time())
+        
+        updated_times = []
+        for idx, t_val in enumerate(st.session_state.auto_times):
+            with st.container():
+                st.markdown(f'<div class="auto-dist-card">🕒 <b>مَوْعِدُ الدَّفْعَةِ {idx+1} (عَدَدٌ تِلْقَائِيٌّ)</b></div>', unsafe_allow_html=True)
+                c1, c2 = st.columns([4, 1])
+                new_t = c1.time_input(f"الوَقْتُ", t_val, key=f"at_{idx}")
+                if c2.button("🗑️ حَذْفٌ", key=f"ad_{idx}"):
+                    st.session_state.auto_times.pop(idx)
+                    st.rerun()
+                updated_times.append(new_t)
+        
+        st.session_state.auto_times = updated_times
+        
+        # حساب التوزيع التلقائي للعرض فقط
+        num_slots = len(st.session_state.auto_times)
+        if num_slots > 0:
+            avg = len(final_df) // num_slots
+            rem = len(final_df) % num_slots
+            st.info(f"📊 السِّرَاعَةُ الحَالِيَّةُ: **{num_slots}** دَفْعَةٍ | كُلُّ دَفْعَةٍ سَتُرْسِلُ حَوَالَيْ **{avg}** إِيمِيل.")
 
-        start_from = st.number_input("نُقْطَةُ البِدَايَةِ (رَقْمُ السِّجِلِّ):", 0, len(final_df)-1, st.session_state.current_idx)
-        
-        launch_btn = st.button("▶️ بَدْءُ الحَمْلَةِ المُرَتَّبَةِ", type="primary", use_container_width=True)
-        
-        if launch_btn:
-            if enable_schedule:
-                st.warning(f"فِي حَالَةِ انْتِظَارٍ لِلْجَدْوَلَةِ: {sched_time}")
-                while datetime.now().time() < sched_time:
-                    time.sleep(5)
-            
+        inter_delay = st.slider("التَّأْخِيرُ بَيْنَ الرَّسَائِلِ دَاخِلَ الدَّفْعَةِ (ثَوَانٍ):", 0, 20, 2)
+
+        if st.button("🚀 بَدْءُ جَدْوَلَةِ الإِرْسَالِ", type="primary", use_container_width=True):
             st.session_state.is_running = True
-            st.session_state.current_idx = start_from
             
-            # مُعَالَجَةُ مَلَفَّاتِ ZIP
+            # تجهيز المرفقات الذكية
             custom_map = {}
             if zip_file:
                 with zipfile.ZipFile(zip_file, 'r') as z:
-                    for name in z.namelist():
-                        clean_name = name.split('.')[0]
-                        custom_map[clean_name] = {"name": name, "content": z.read(name)}
+                    for n in z.namelist(): custom_map[n.split('.')[0]] = {"name": n, "content": z.read(n)}
+
+            current_row = 0
+            p_bar = st.progress(0.0)
+            status_placeholder = st.empty()
 
             try:
-                # مَنْطِقُ الإِرْسَالِ بِالدَّفَعَاتِ
-                total_to_send = len(final_df)
-                idx = st.session_state.current_idx
-                
-                status_placeholder = st.empty()
-                p_bar = st.progress(0.0)
-                
-                while idx < total_to_send and st.session_state.is_running:
-                    # تَحْدِيدُ نِهَايَةِ الدَّفْعَةِ الحَالِيَّةِ
-                    current_batch_end = min(idx + batch_size, total_to_send)
+                # التنفيذ بناءً على المواعيد المضافة
+                for b_idx, target_time_val in enumerate(st.session_state.auto_times):
+                    # حساب حجم الدفعة الحالية
+                    current_batch_size = avg + (1 if b_idx < rem else 0)
                     
-                    status_placeholder.markdown(f"""
-                    <div class="batch-info">
-                    🚀 <b>جَارِي إِرْسَالُ الدَّفْعَةِ الحَالِيَّةِ:</b> مِن {idx+1} إِلَى {current_batch_end}<br>
-                    📊 <b>الإِجْمَالِيُّ المَتَبَقِّي:</b> {total_to_send - idx} رِسَالَة
-                    </div>
-                    """, unsafe_allow_html=True)
+                    target_dt = datetime.combine(datetime.today(), target_time_val)
                     
-                    # فَتْحُ الِاتِّصَالِ لِكُلِّ دَفْعَةٍ لِتَجَنُّبِ قَطْعِ الخَادِمِ
+                    # انتظار موعد الدفعة
+                    while datetime.now() < target_dt:
+                        remaining = int((target_dt - datetime.now()).total_seconds())
+                        status_placeholder.markdown(f'<div class="batch-config-card">🕒 <b>الدَّفْعَةُ {b_idx+1}:</b> فِي حَالَةِ انْتِظَارٍ... <span class="timer-active">{remaining}</span> ثَانِيَة لِلانْطِلَاقِ.</div>', unsafe_allow_html=True)
+                        time.sleep(1)
+                        if not st.session_state.is_running: break
+                    
+                    if not st.session_state.is_running: break
+
+                    status_placeholder.info(f"🚀 جَارِي تَنْفِيذُ الدَّفْعَةِ {b_idx+1} ({current_batch_size} رِسَالَة)...")
+                    
                     server = smtplib.SMTP("smtp.gmail.com", 587)
                     server.starttls()
                     server.login(u_mail, u_pass)
-                    
-                    for i in range(idx, current_batch_end):
+
+                    end_point = min(current_row + current_batch_size, len(final_df))
+                    for i in range(current_row, end_point):
                         row = final_df.iloc[i]
                         addr = str(row[e_col]).strip()
                         nm = str(row[n_col]) if n_col else "عَمِيلَنَا العَزِيزُ"
                         f_body = msg_body.replace("{name}", nm)
                         
-                        current_files = []
+                        atts = []
                         for ga in general_atts:
-                            current_files.append({"name": ga.name, "content": ga.read()})
+                            atts.append({"name": ga.name, "content": ga.read()})
                             ga.seek(0)
                         
-                        prefix = addr.split('@')[0]
-                        if addr in custom_map: current_files.append(custom_map[addr])
-                        elif prefix in custom_map: current_files.append(custom_map[prefix])
+                        if addr in custom_map: atts.append(custom_map[addr])
+                        elif addr.split('@')[0] in custom_map: atts.append(custom_map[addr.split('@')[0]])
 
-                        status, info = send_mail(server, u_mail, addr, subj, f_body, current_files, (m_mode=="HTML"))
-                        st.session_state.logs.append({"السِّجِلُّ": i+1, "المُسْتَلِمُ": addr, "الحَالَةُ": "✅" if status else "❌", "التَّفَاصِيلُ": info})
+                        ok, info = send_mail(server, u_mail, addr, subj, f_body, atts, (m_mode=="HTML"))
+                        st.session_state.logs.append({"مَوْعِدُ الدَّفْعَةِ": target_time_val.strftime('%H:%M'), "المُسْتَلِمُ": addr, "الحَالَةُ": "✅" if ok else "❌", "التَّفَاصِيلُ": info})
                         
-                        # تَحْدِيثُ الحَالَةِ
-                        idx = i + 1
-                        st.session_state.current_idx = idx
-                        p_bar.progress(idx / total_to_send)
-                        time.sleep(inter_msg_delay)
+                        current_row += 1
+                        p_bar.progress(current_row / len(final_df))
+                        time.sleep(inter_delay)
                     
                     server.quit()
-                    
-                    # الِانْتِظَارُ بَيْنَ الدَّفَعَاتِ
-                    if idx < total_to_send:
-                        next_batch_time = datetime.now() + timedelta(minutes=wait_time)
-                        for m in range(wait_time * 60, 0, -1):
-                            status_placeholder.warning(f"⏳ تَمَّ إِنْهَاءُ الدَّفْعَةِ. سَنَبْدَأُ الدَّفْعَةَ القَادِمَةَ بَعْدَ {m} ثَانِيَةٍ (عِنْدَ السَّاعَةِ {next_batch_time.strftime('%H:%M:%S')})")
-                            time.sleep(1)
-                            if not st.session_state.is_running: break
                 
-                st.success("✅ تَمَّ إِنْهَاءُ كَافَّةِ الدَّفَعَاتِ بِنَجَاحٍ!")
+                st.success("✨ تَمَّ الِانْتِهَاءُ مِنْ كَافَّةِ الدَّفَعَاتِ المَجْدُولَةِ بِنَجَاحٍ.")
             except Exception as e:
-                st.error(f"❌ خَطَأٌ تَقْنِيٌّ: {e}")
+                st.error(f"❌ خَطَأٌ تَقْنِيٌّ: {str(e)}")
 
         if st.session_state.logs:
             st.divider()
-            st.subheader("📋 تَقْرِيرُ النَّتَائِجِ")
-            st.table(pd.DataFrame(st.session_state.logs).tail(10))
+            st.subheader("📋 تَقْرِيرُ الإِرْسَالِ المُرَتَّبِ")
+            st.table(pd.DataFrame(st.session_state.logs).tail(20))
