@@ -71,18 +71,17 @@ with col2:
             progress_bar = st.progress(0)
             status_text = st.empty()
 
-            try:
-                # إنشاء اتصال بالخادم مرة واحدة لتحسين الأداء
-                try:
-    server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
-    server.ehlo() # تَحِيَّةُ الخادِمِ
-    server.starttls() # تَنْشيطُ التَّشْفيرِ
-    server.ehlo()
-    server.login(user_email, app_password)
-except Exception as e:
-    st.error(f"فَشَلَ الاتِّصالُ: {e}")
-    st.stop() # إِيْقافُ التَّنْفيذِ عِنْدَ الخَطَأِ
-
+      try:
+            # يجب أن يكون هناك فراغ (4 مسافات) قبل الأسطر التالية
+            server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(user_email, app_password)
+        except Exception as e:
+            # يجب أن يكون هناك فراغ أيضاً هنا
+            st.error(f"فَشَلَ الاتِّصالُ: {e}")
+            st.stop()
 
                 for index, row in df.iterrows():
                     recipient = row[email_col]
