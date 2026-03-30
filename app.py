@@ -68,7 +68,6 @@ def send_mail(server, sender, to, subject, body, atts, is_html):
         msg = MIMEMultipart()
         msg['From'], msg['To'], msg['Subject'] = sender, to, subject
         
-        # إذا كانت الرسالة HTML أو نصية، نغلفها دائما بـ RTL لضمان التنسيق
         formatted_body = wrap_html_rtl(body)
         msg.attach(MIMEText(formatted_body, 'html'))
         
@@ -125,11 +124,14 @@ with t1:
 
 with t2:
     subj = st.text_input("عنوان الرسالة")
-    msg_body = st.text_area("محتوى الرسالة (يدعم {name} و {phone})", height=200, help="سيتم تنسيق هذه الرسالة تلقائيا لتظهر بجهة اليمين للمستلم")
+    msg_body = st.text_area("محتوى الرسالة (يدعم {name} و {phone})", height=200)
     gen_atts = st.file_uploader("مرفقات عامة", accept_multiple_files=True)
     
     if not df.empty:
+        # حساب نسبة التقدم بأمان لتجنب خطأ StreamlitAPIException
+        progress_val = min(float(st.session_state.current_index) / len(df), 1.0)
         st.info(f"حالة الارسال: تم إرسال {st.session_state.current_index} من {len(df)}")
+        
         delay = st.slider("فاصل زمني (ثانية)", 0, 10, 2)
         
         col_start, col_pause = st.columns(2)
@@ -138,11 +140,13 @@ with t2:
 
         if pause_btn:
             st.session_state.is_running = False
-            st.warning("تم طلب التوقف.. سيتوقف النظام بعد انتهاء الرسالة الحالية.")
+            st.warning("تم إيقاف التشغيل.. سيتوقف النظام بعد الرسالة الحالية.")
 
         if start_btn:
             if not u_mail or not u_pass:
                 st.error("لطفا أدخل بيانات الايميل في القائمة الجانبية")
+            elif st.session_state.current_index >= len(df):
+                st.warning("تم إرسال كافة الرسائل بالفعل. قم بتصفير النظام للبدء من جديد.")
             else:
                 st.session_state.is_running = True
                 
@@ -152,16 +156,16 @@ with t2:
                         for n in z.namelist(): custom_map[n.split('.')[0]] = {"name": n, "content": z.read(n)}
 
                 status_txt = st.empty()
-                p_bar = st.progress(st.session_state.current_index / len(df))
+                p_bar = st.progress(progress_val)
 
                 try:
                     server = smtplib.SMTP("smtp.gmail.com", 587)
                     server.starttls()
                     server.login(u_mail, u_pass)
 
-                    # الاستئناف الذكي من حيث توقفنا
                     for i in range(st.session_state.current_index, len(df)):
-                        if not st.session_state.is_running: break
+                        if not st.session_state.is_running: 
+                            break
                         
                         row = df.iloc[i]
                         addr = str(row[e_col]).strip()
@@ -170,7 +174,6 @@ with t2:
                         
                         f_body = msg_body.replace("{name}", nm).replace("{phone}", ph)
                         
-                        # تجميع المرفقات
                         atts = []
                         for ga in gen_atts:
                             atts.append({"name": ga.name, "content": ga.read()})
@@ -186,9 +189,10 @@ with t2:
                             "م": i + 1, "المستلم": addr, "الحالة": "✅" if ok else "❌"
                         })
                         
-                        # تحديث العداد والمؤشر لضمان عدم التكرار عند الاستئناف
                         st.session_state.current_index = i + 1
-                        p_bar.progress(st.session_state.current_index / len(df))
+                        # تحديث شريط التقدم مع التأكد من عدم تجاوز القيمة 1.0
+                        new_progress = min(float(st.session_state.current_index) / len(df), 1.0)
+                        p_bar.progress(new_progress)
                         status_txt.text(f"جاري الارسال: {st.session_state.current_index} / {len(df)}")
                         
                         time.sleep(delay)
@@ -199,7 +203,7 @@ with t2:
                         st.session_state.is_running = False
                 
                 except Exception as e:
-                    st.error(f"خطأ: {e}")
+                    st.error(f"خطأ في الاتصال أو الإرسال: {e}")
                     st.session_state.is_running = False
 
         if st.session_state.logs:
