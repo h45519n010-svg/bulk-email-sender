@@ -73,9 +73,16 @@ with col2:
 
             try:
                 # إنشاء اتصال بالخادم مرة واحدة لتحسين الأداء
-                server = smtplib.SMTP(smtp_server, smtp_port)
-                server.starttls()
-                server.login(user_email, app_password)
+                try:
+    server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
+    server.ehlo() # تَحِيَّةُ الخادِمِ
+    server.starttls() # تَنْشيطُ التَّشْفيرِ
+    server.ehlo()
+    server.login(user_email, app_password)
+except Exception as e:
+    st.error(f"فَشَلَ الاتِّصالُ: {e}")
+    st.stop() # إِيْقافُ التَّنْفيذِ عِنْدَ الخَطَأِ
+
 
                 for index, row in df.iterrows():
                     recipient = row[email_col]
