@@ -7,127 +7,125 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 
-# إعدادات الصفحة واللغة العربية
-st.set_page_config(page_title="مُرسل البريد الجماعي الذكي", layout="wide")
+# --- إعدادات الصفحة واللغة ---
+st.set_page_config(page_title="مُرسل البريد الجماعي الذكي", layout="wide", page_icon="📧")
 
-# تنسيق واجهة المستخدم لتدعم العربية (RTL)
+# دعم العربية (RTL) وتنسيق الواجهة
 st.markdown("""
     <style>
-    .main { text-align: right; direction: rtl; }
-    div[data-testid="stSidebarNav"] { text-align: right; direction: rtl; }
-    label { text-align: right; width: 100%; }
-    .stAlert { direction: rtl; }
+    @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700&display=swap');
+    html, body, [data-testid="stSidebar"], .main {
+        font-family: 'Tajawal', sans-serif;
+        direction: RTL;
+        text-align: right;
+    }
+    .stTextInput input, .stTextArea textarea, [data-testid="stSelectbox"] {
+        direction: RTL;
+        text-align: right;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-## --- الشريط الجانبي: إعدادات SMTP ---
+def send_email(server, sender_email, recipient_email, subject, body, attachments):
+    """وظيفة بناء وإرسال رسالة بريد واحدة."""
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = recipient_email
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+
+        for attachment in attachments:
+            part = MIMEBase('application', "octet-stream")
+            part.set_payload(attachment.read())
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f'attachment; filename={attachment.name}')
+            msg.attach(part)
+            attachment.seek(0)
+
+        server.send_message(msg)
+        return True, "Success"
+    except Exception as e:
+        return False, str(e)
+
+# --- الشريط الجانبي: إعدادات SMTP ---
 with st.sidebar:
     st.header("⚙️ إعدادات الخادم (SMTP)")
     smtp_server = st.text_input("خادم SMTP", value="smtp.gmail.com")
     smtp_port = st.number_input("المنفذ (Port)", value=587)
-    user_email = st.text_input("بريدك الإلكتروني (المرسل)")
-    app_password = st.text_input("كلمة مرور التطبيق (App Password)", type="password")
-    
+    user_email = st.text_input("بريد المرسل", placeholder="example@gmail.com")
+    app_password = st.text_input("كلمة مرور التطبيق", type="password", help="استخدم 16 حرفاً من App Passwords")
     st.markdown("---")
-    delay_seconds = st.slider("زمن التأخير بين الرسائل (ثواني)", 1, 10, 2)
+    delay = st.slider("زمن التأخير (ثواني)", 0, 10, 2)
 
-## --- الواجهة الرئيسية ---
-st.title("📧 أداة إرسال البريد الجماعي الذكية")
-st.info("ارفع ملف الإكسل، صمم رسالتك، وأرسلها بلمسة واحدة.")
-
-col1, col2 = st.columns([1, 1])
+# --- الواجهة الرئيسية ---
+st.title("📧 أداة إرسال البريد الجماعي")
+col1, col2 = st.columns([1, 1.2], gap="large")
 
 with col1:
-    st.subheader("1️⃣ البيانات والمستقبلون")
+    st.subheader("1️⃣ البيانات")
     uploaded_file = st.file_uploader("ارفع ملف Excel أو CSV", type=['xlsx', 'csv'])
-    
+    df, email_col, name_col = None, None, None
+
     if uploaded_file:
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file)
         else:
             df = pd.read_excel(uploaded_file)
-            
-        st.write("معاينة البيانات:")
-        st.dataframe(df.head(5))
-        
-        columns = df.columns.tolist()
-        email_col = st.selectbox("اختر عمود البريد الإلكتروني:", columns)
-        name_col = st.selectbox("اختر عمود الاسم (للتخصيص الذكي):", [None] + columns)
+        st.dataframe(df.head(3), use_container_width=True)
+        cols = df.columns.tolist()
+        email_col = st.selectbox("عمود البريد الإلكتروني:", cols)
+        name_col = st.selectbox("عمود الاسم (اختياري):", [None] + cols)
 
 with col2:
-    st.subheader("2️⃣ محتوى الرسالة")
-    subject = st.text_input("موضوع الرسالة")
-    message_body = st.text_area("نص الرسالة (استخدم {name} للتخصيص)", height=200)
-    attachments = st.file_uploader("أضف مرفقات (اختياري)", accept_multiple_files=True)
+    st.subheader("2️⃣ الرسالة")
+    subject_input = st.text_input("موضوع الرسالة")
+    message_input = st.text_area("النص (استخدم {name} للتخصيص)", height=200)
+    files = st.file_uploader("المرفقات", accept_multiple_files=True)
 
-    if st.button("🚀 بدء عملية الإرسال الجماعي"):
-        if not uploaded_file or not user_email or not app_password:
-            st.error("الرجاء إكمال كافة الإعدادات ورفع الملف أولاً.")
-        else:
-            success_count = 0
-            fail_count = 0
-            failed_emails = []
-
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-
-      try:
-            # يجب أن يكون هناك فراغ (4 مسافات) قبل الأسطر التالية
+# --- منطق الإرسال ---
+st.divider()
+if st.button("🚀 بدء الإرسال الآن", use_container_width=True):
+    if not uploaded_file or not user_email or not app_password:
+        st.warning("الرجاء إكمال البيانات وإعدادات SMTP.")
+    else:
+        success_list, failure_list = [], []
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        try:
+            # الاتصال بالخادم
             server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
             server.ehlo()
             server.starttls()
             server.ehlo()
             server.login(user_email, app_password)
-        except Exception as e:
-            # يجب أن يكون هناك فراغ أيضاً هنا
-            st.error(f"فَشَلَ الاتِّصالُ: {e}")
-            st.stop()
-
-                for index, row in df.iterrows():
-                    recipient = row[email_col]
-                    recipient_name = str(row[name_col]) if name_col else "عميلنا العزيز"
-                    
-                    # تخصيص الرسالة
-                    personalized_msg = message_body.replace("{name}", recipient_name)
-                    
-                    # إنشاء هيكل الإيميل
-                    msg = MIMEMultipart()
-                    msg['From'] = user_email
-                    msg['To'] = recipient
-                    msg['Subject'] = subject
-                    msg.attach(MIMEText(personalized_msg, 'plain'))
-
-                    # إضافة المرفقات
-                    for uploaded_attach in attachments:
-                        part = MIMEBase('application', "octet-stream")
-                        part.set_payload(uploaded_attach.read())
-                        encoders.encode_base64(part)
-                        part.add_header('Content-Disposition', f'attachment; filename={uploaded_attach.name}')
-                        msg.attach(part)
-                        uploaded_attach.seek(0) # إعادة المؤشر لقراءة الملف للرسالة التالية
-
-                    try:
-                        server.send_message(msg)
-                        success_count += 1
-                    except Exception as e:
-                        fail_count += 1
-                        failed_emails.append(f"{recipient}: {str(e)}")
-
-                    # تحديث التقدم
-                    progress = (index + 1) / len(df)
-                    progress_bar.progress(progress)
-                    status_text.text(f"جاري الإرسال إلى: {recipient}")
-                    
-                    time.sleep(delay_seconds)
-
-                server.quit()
+            
+            total = len(df)
+            for index, row in df.iterrows():
+                recipient = str(row[email_col]).strip()
+                p_name = str(row[name_col]) if name_col else "عزيزي العميل"
+                final_body = message_input.replace("{name}", p_name)
                 
-                # تقرير النهاية
-                st.success(f"✅ اكتملت العملية! الناجحة: {success_count} | الفاشلة: {fail_count}")
-                if failed_emails:
-                    with st.expander("عرض تفاصيل الرسائل الفاشلة"):
-                        for err in failed_emails:
-                            st.write(err)
-                            
-            except Exception as e:
-                st.error(f"خطأ في الاتصال بالخادم: {e}")
+                status_text.text(f"إرسال إلى: {recipient} ({index+1}/{total})")
+                is_sent, err = send_email(server, user_email, recipient, subject_input, final_body, files)
+                
+                if is_sent:
+                    success_list.append(recipient)
+                else:
+                    failure_list.append({"email": recipient, "error": err})
+                
+                progress_bar.progress((index + 1) / total)
+                time.sleep(delay)
+            
+            server.quit()
+            st.success(f"اكتمل! نجاح: {len(success_list)} | فشل: {len(failure_list)}")
+            if failure_list:
+                with st.expander("تقرير الأخطاء"):
+                    st.table(pd.DataFrame(failure_list))
+        except Exception as e:
+            st.error(f"خطأ في الاتصال بالخادم: {e}")
+
+# دليل الاستخدام
+with st.expander("📖 دليل استخراج App Password"):
+    st.write("1. فعل 'التحقق بخطوتين' في حساب جوجل. 2. ابحث عن 'App Passwords'. 3. اختر 'Other' وسمه 'MailApp'. 4. انسخ الـ 16 حرفاً.")
