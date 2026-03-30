@@ -38,6 +38,7 @@ st.markdown("""
 if 'logs' not in st.session_state: st.session_state.logs = []
 if 'is_running' not in st.session_state: st.session_state.is_running = False
 if 'is_paused' not in st.session_state: st.session_state.is_paused = False
+# التأكد من بقاء المؤشر محفوظا بين عمليات التحديث
 if 'current_index' not in st.session_state: st.session_state.current_index = 0
 
 def reset_process():
@@ -86,7 +87,7 @@ with st.sidebar:
     u_mail = st.text_input("ايميل Gmail", placeholder="example@gmail.com")
     u_pass = st.text_input("كلمة مرور التطبيق", type="password")
     st.divider()
-    if st.button("🗑️ مسح السجلات والبيانات"):
+    if st.button("🗑️ مسح السجلات والبدء من جديد"):
         reset_process()
         st.rerun()
 
@@ -129,89 +130,105 @@ with t2:
     st.divider()
     
     if not df.empty:
+        # عرض حالة التقدم الحالية
+        st.info(f"الوضعية الحالية: تم إرسال {st.session_state.current_index} من أصل {len(df)}")
+        
         delay = st.slider("التاخير بين كل رسالة (ثانية)", 0, 20, 2)
         
         # --- CONTROL BUTTONS ---
         col_start, col_pause, col_stop = st.columns(3)
         
-        start_btn = col_start.button("▶️ بدء / استئناف الارسال", use_container_width=True, type="primary")
+        # تسمية الزر تتغير بناء على الحالة
+        btn_label = "▶️ بدء الارسال" if st.session_state.current_index == 0 else "⏯️ استئناف الارسال"
+        start_btn = col_start.button(btn_label, use_container_width=True, type="primary")
         pause_btn = col_pause.button("⏸️ توقف مؤقت", use_container_width=True)
         stop_btn = col_stop.button("⏹️ ايقاف نهائي", use_container_width=True)
 
         if pause_btn:
             st.session_state.is_paused = True
-            st.warning("تم تعليق العملية مؤقتا")
+            st.session_state.is_running = False
+            st.warning(f"تم تعليق العملية مؤقتا عند الرقم {st.session_state.current_index}")
         
         if stop_btn:
-            st.session_state.is_running = False
-            st.session_state.is_paused = False
-            st.error("تم ايقاف العملية نهائيا")
+            reset_process()
+            st.error("تم ايقاف العملية وتصفير العداد")
             st.rerun()
 
         if start_btn:
-            st.session_state.is_running = True
-            st.session_state.is_paused = False
-            
-            # تجهيز المرفقات المخصصة
-            custom_map = {}
-            if zip_file:
-                with zipfile.ZipFile(zip_file, 'r') as z:
-                    for n in z.namelist(): custom_map[n.split('.')[0]] = {"name": n, "content": z.read(n)}
-
-            p_bar = st.progress(st.session_state.current_index / len(df))
-            status_txt = st.empty()
-
-            try:
-                server = smtplib.SMTP("smtp.gmail.com", 587)
-                server.starttls()
-                server.login(u_mail, u_pass)
-
-                # حلقة الارسال التي تدعم الاستئناف والتوقف
-                while st.session_state.current_index < len(df) and st.session_state.is_running:
-                    if st.session_state.is_paused:
-                        status_txt.info(f"تم التوقف عند الرقم: {st.session_state.current_index}")
-                        break
-                    
-                    row = df.iloc[st.session_state.current_index]
-                    addr = str(row[e_col]).strip()
-                    nm = str(row[n_col]) if n_col else "عميلنا"
-                    ph = str(row[p_col]) if p_col else ""
-                    
-                    # تخصيص الرسالة
-                    f_body = msg_body.replace("{name}", nm).replace("{phone}", ph)
-                    
-                    # المرفقات
-                    atts = []
-                    for ga in gen_atts:
-                        atts.append({"name": ga.name, "content": ga.read()})
-                        ga.seek(0)
-                    
-                    if addr in custom_map: atts.append(custom_map[addr])
-                    elif addr.split('@')[0] in custom_map: atts.append(custom_map[addr.split('@')[0]])
-
-                    # الارسال الفعلي
-                    ok, info = send_mail(server, u_mail, addr, subj, f_body, atts, (m_mode=="HTML"))
-                    
-                    st.session_state.logs.append({
-                        "الرقم": st.session_state.current_index + 1,
-                        "المستلم": addr,
-                        "الحالة": "✅" if ok else "❌",
-                        "التفاصيل": info
-                    })
-                    
-                    st.session_state.current_index += 1
-                    p_bar.progress(st.session_state.current_index / len(df))
-                    status_txt.text(f"جاري الارسال: {st.session_state.current_index} / {len(df)}")
-                    
-                    time.sleep(delay)
+            if not u_mail or not u_pass:
+                st.error("الرجاء ادخال بيانات الحساب في القائمة الجانبية")
+            else:
+                st.session_state.is_running = True
+                st.session_state.is_paused = False
                 
-                server.quit()
-                if st.session_state.current_index >= len(df):
-                    st.success("تم الانتهاء من كامل القائمة بنجاح")
+                # تجهيز المرفقات المخصصة
+                custom_map = {}
+                if zip_file:
+                    with zipfile.ZipFile(zip_file, 'r') as z:
+                        for n in z.namelist(): custom_map[n.split('.')[0]] = {"name": n, "content": z.read(n)}
+
+                p_bar = st.progress(st.session_state.current_index / len(df))
+                status_txt = st.empty()
+
+                try:
+                    server = smtplib.SMTP("smtp.gmail.com", 587)
+                    server.starttls()
+                    server.login(u_mail, u_pass)
+
+                    # البدء من current_index يضمن عدم التكرار
+                    for i in range(st.session_state.current_index, len(df)):
+                        # التحقق من الضغط على توقف مؤقت داخل الحلقة
+                        if not st.session_state.is_running or st.session_state.is_paused:
+                            break
+                        
+                        row = df.iloc[i]
+                        addr = str(row[e_col]).strip()
+                        nm = str(row[n_col]) if n_col else "عميلنا"
+                        ph = str(row[p_col]) if p_col else ""
+                        
+                        # تخصيص الرسالة
+                        f_body = msg_body.replace("{name}", nm).replace("{phone}", ph)
+                        
+                        # المرفقات
+                        atts = []
+                        for ga in gen_atts:
+                            atts.append({"name": ga.name, "content": ga.read()})
+                            ga.seek(0)
+                        
+                        if addr in custom_map: atts.append(custom_map[addr])
+                        elif addr.split('@')[0] in custom_map: atts.append(custom_map[addr.split('@')[0]])
+
+                        # الارسال الفعلي
+                        ok, info = send_mail(server, u_mail, addr, subj, f_body, atts, (m_mode=="HTML"))
+                        
+                        st.session_state.logs.append({
+                            "الرقم": i + 1,
+                            "المستلم": addr,
+                            "الحالة": "✅" if ok else "❌",
+                            "التفاصيل": info
+                        })
+                        
+                        # تحديث المؤشر فوراً بعد كل عملية إرسال ناجحة أو فاشلة
+                        st.session_state.current_index = i + 1
+                        
+                        # تحديث واجهة المستخدم
+                        p_bar.progress(st.session_state.current_index / len(df))
+                        status_txt.text(f"جاري الارسال: {st.session_state.current_index} / {len(df)}")
+                        
+                        time.sleep(delay)
+                    
+                    server.quit()
+                    
+                    if st.session_state.current_index >= len(df):
+                        st.success("تم الانتهاء من كامل القائمة بنجاح")
+                        st.session_state.is_running = False
+                        st.balloons()
+                    else:
+                        st.warning(f"تم التوقف مؤقتاً. يمكنك الاستئناف من الرقم {st.session_state.current_index}")
+
+                except Exception as e:
+                    st.error(f"حدث خطأ أثناء الارسال: {e}")
                     st.session_state.is_running = False
-            
-            except Exception as e:
-                st.error(f"خطا في الاتصال: {e}")
 
         # عرض النتائج
         if st.session_state.logs:
